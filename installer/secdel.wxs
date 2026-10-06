@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SecDel WiX Installer Source
+  Generates a 64-bit MSI installer with Start Menu shortcut, desktop shortcut,
+  Add/Remove Programs entry, admin privilege check, version upgrade support,
+  and .secdel-report file association.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="SecDel"
+           Language="1033"
+           Version="1.0.0"
+           Manufacturer="SecDel"
+           UpgradeCode="8A2E5F10-5E3F-4A1B-9C7D-2E8F4A6B1C3D">
+
+    <Package InstallerVersion="200"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Platform="x64"
+             Description="SecDel - Advanced SSD Secure Deletion Platform"
+             Comments="SecDel installer"
+             Manufacturer="SecDel"
+             Keywords="SSD,secure deletion,data sanitization"
+             Languages="1033" />
+
+    <!-- Version upgrade: prevent downgrade -->
+    <MajorUpgrade AllowDowngrades="no"
+                  AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+                  Schedule="afterInstallInitialize" />
+
+    <!-- Embed cabinets directly into MSI -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Launch condition: Windows 10+ (VersionNT >= 603 for Win10) -->
+    <Condition Message="This application requires Windows 10 or later (64-bit).">
+      <![CDATA[VersionNT64 >= 603]]>
+    </Condition>
+
+    <!-- Launch condition: admin rights -->
+    <Condition Message="You must be an administrator to install this application. Please run the installer as administrator.">
+      <![CDATA[Privileged]]>
+    </Condition>
+
+    <!-- Feature tree -->
+    <Feature Id="ProductFeature"
+             Title="SecDel"
+             Description="SecDel application files"
+             Level="1"
+             ConfigurableDirectory="INSTALLFOLDER"
+             Display="expand">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="FileAssociation" />
+      <ComponentRef Id="RegistryEntries" />
+    </Feature>
+
+    <!-- UI: WiX built-in feature tree dialog -->
+    <UIRef Id="WixUI_FeatureTree" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+
+    <!-- Custom UI variables -->
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+    <WixVariable Id="WixUIBannerBmp" Value="banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="dialog.bmp" />
+
+    <!-- Icon for Add/Remove Programs -->
+    <Icon Id="appicon.exe" SourceFile="$(var.SolutionDir)src-tauri\icons\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="appicon.exe" />
+    <Property Id="ARPCOMMENTS" Value="SecDel - Advanced SSD Secure Deletion Platform" />
+    <Property Id="ARPCONTACT" Value="Shaik Abdul Razak" />
+
+    <!-- Install directory property -->
+    <Property Id="INSTALLFOLDER">
+      <RegistrySearch Id="RegSearchInstallFolder"
+                      Root="HKLM"
+                      Key="Software\SecDel\SecDel"
+                      Name="InstallPath"
+                      Type="directory" />
+    </Property>
+  </Product>
+
+  <!-- Directory structure -->
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="MANUFACTURERFOLDER" Name="SecDel">
+          <Directory Id="INSTALLFOLDER" Name="SecDel" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="SecDel" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
+    </Directory>
+  </Fragment>
+
+  <!-- Components -->
+  <Fragment>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <!-- Main executable -->
+      <Component Id="MainExecutable" Guid="*">
+        <File Id="SecDelEXE"
+              Name="SecDel.exe"
+              Source="$(var.SolutionDir)src-tauri\target\release\SecDel.exe"
+              KeyPath="yes"
+              DiskId="1"
+              Vital="yes">
+          <!-- Shell execute verb for .secdel-report files -->
+          <ProgId Id="SecDel.Report" Description="SecDel Report File" Icon="appicon.exe" Advertise="no">
+            <Extension Id="secdel-report" ContentType="application/x-secdel-report">
+              <Verb Id="open" Command="Open" Argument="&quot;%1&quot;" />
+            </Extension>
+          </ProgId>
+        </File>
+      </Component>
+
+      <!-- WebView2 loader (if bundled) -->
+      <Component Id="WebView2Loader" Guid="*">
+        <File Id="WebView2LoaderDLL"
+              Name="Microsoft.Web.WebView2.Core.dll"
+              Source="$(var.SolutionDir)src-tauri\target\release\Microsoft.Web.WebView2.Core.dll"
+              KeyPath="yes"
+              Vital="yes" />
+      </Component>
+
+      <!-- All Tauri runtime DLLs -->
+      <Component Id="TauriRuntimeDLLs" Guid="*">
+        <File Id="TauriDLL" Name="tauri.dll"
+              Source="$(var.SolutionDir)src-tauri\target\release\tauri.dll"
+              KeyPath="yes" Vital="yes" />
+        <File Id="WebView2LoaderDLL2" Name="WebView2Loader.dll"
+              Source="$(var.SolutionDir)src-tauri\target\release\WebView2Loader.dll" />
+      </Component>
+
+      <!-- Rust application DLLs (harvested in practice by heat.exe) -->
+      <Component Id="RustRuntimeDLLs" Guid="*">
+        <File Id="SecDelCoreDLL" Name="secdel_core.dll"
+              Source="$(var.SolutionDir)src-tauri\target\release\secdel_core.dll" />
+        <RemoveFolder Id="RemoveINSTALLFOLDER" On="uninstall" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\SecDel\SecDel"
+                       Name="InstallPath"
+                       Type="string"
+                       Value="[INSTALLFOLDER]"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Start menu shortcut -->
+    <Component Id="ApplicationShortcut" Directory="ApplicationProgramsFolder" Guid="*">
+      <Shortcut Id="AppStartMenuShortcut"
+                Name="SecDel"
+                Description="SecDel - Advanced SSD Secure Deletion Platform"
+                Target="[INSTALLFOLDER]SecDel.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                IconFileIndex="0" />
+      <Shortcut Id="AppStartMenuUninstallShortcut"
+                Name="Uninstall SecDel"
+                Description="Uninstall SecDel"
+                Target="[System64Folder]msiexec.exe"
+                Arguments="/x [ProductCode]"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\SecDel\SecDel"
+                     Name="StartMenuShortcut"
+                     Type="integer"
+                     Value="1"
+                     KeyPath="yes" />
+    </Component>
+
+    <!-- Desktop shortcut -->
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="*">
+      <Shortcut Id="AppDesktopShortcut"
+                Name="SecDel"
+                Description="SecDel - Advanced SSD Secure Deletion Platform"
+                Target="[INSTALLFOLDER]SecDel.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                IconFileIndex="0" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\SecDel\SecDel"
+                     Name="DesktopShortcut"
+                     Type="integer"
+                     Value="1"
+                     KeyPath="yes" />
+    </Component>
+
+    <!-- File association component (fallback to ProgId on EXE) -->
+    <Component Id="FileAssociation" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKCR"
+                     Key=".secdel-report"
+                     Name="Content Type"
+                     Value="application/x-secdel-report"
+                     Type="string"
+                     KeyPath="yes" />
+      <RegistryValue Root="HKCR"
+                     Key=".secdel-report"
+                     Value="SecDel.Report"
+                     Type="string" />
+      <RegistryValue Root="HKCR"
+                     Key="SecDel.Report\DefaultIcon"
+                     Value="[INSTALLFOLDER]SecDel.exe,0"
+                     Type="string" />
+      <RegistryValue Root="HKCR"
+                     Key="SecDel.Report\shell\open\command"
+                     Value="&quot;[INSTALLFOLDER]SecDel.exe&quot; &quot;%1&quot;"
+                     Type="string" />
+    </Component>
+
+    <!-- Registry entries for Add/Remove Programs -->
+    <Component Id="RegistryEntries" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKLM"
+                     Key="Software\SecDel\SecDel"
+                     Name="Version"
+                     Type="string"
+                     Value="1.0.0"
+                     KeyPath="yes" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\SecDel\SecDel"
+                     Name="InstallDate"
+                     Type="string"
+                     Value="!(loc.DateTime)" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\SecDel"
+                     Name="DisplayName"
+                     Type="string"
+                     Value="SecDel" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\SecDel"
+                     Name="UninstallString"
+                     Type="string"
+                     Value="[System64Folder]msiexec.exe /x [ProductCode]" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\SecDel"
+                     Name="DisplayIcon"
+                     Type="string"
+                     Value="[INSTALLFOLDER]SecDel.exe" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\SecDel"
+                     Name="DisplayVersion"
+                     Type="string"
+                     Value="1.0.0" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\SecDel"
+                     Name="Publisher"
+                     Type="string"
+                     Value="Shaik Abdul Razak" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\SecDel"
+                     Name="NoModify"
+                     Type="integer"
+                     Value="1" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\SecDel"
+                     Name="NoRepair"
+                     Type="integer"
+                     Value="1" />
+    </Component>
+  </Fragment>
+
+  <!-- Custom actions -->
+  <Fragment>
+    <!-- Check admin rights at startup -->
+    <CustomAction Id="CheckAdminRights"
+                  Error="SecDel requires administrator privileges to install. Please run the installer as administrator." />
+
+    <!-- Ensure no other instance is running before upgrade -->
+    <CustomAction Id="CloseSecDel"
+                  BinaryKey="WixCA"
+                  DllEntry="WixCloseApplications"
+                  Execute="immediate"
+                  Return="check" />
+
+    <InstallExecuteSequence>
+      <RemoveExistingProducts After="InstallValidate" />
+    </InstallExecuteSequence>
+
+    <!-- Property for admin rights UI -->
+    <InstallUISequence>
+      <LaunchConditions After="AppSearch">
+        <Condition Message="You must be an administrator to install this application.">
+          Privileged
+        </Condition>
+      </LaunchConditions>
+    </InstallUISequence>
+  </Fragment>
+</Wix>
